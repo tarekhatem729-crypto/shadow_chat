@@ -1011,12 +1011,12 @@ Future<void> initializeFirebase() async {
         if (kIsWeb) {
           await Firebase.initializeApp(
             options: const FirebaseOptions(
-              apiKey: 'AIzaSyC8Ft8gdu-41A5bgQItt0J8zsTTqMSYaR0',
-              appId: '1:663578459909:web:66e60586316af862b8c16c',
-              messagingSenderId: '663578459909',
-              projectId: 'shadow-chat-318a0',
-              authDomain: 'shadow-chat-318a0.firebaseapp.com',
-              storageBucket: 'shadow-chat-318a0.firebasestorage.app',
+              apiKey: 'AIzaSyAyg-kuQKgCnYleTzBJUTyFOJkKNsPSj_M',
+              appId: '1:525641785110:android:acb70e1294c17dec00fa37',
+              messagingSenderId: '525641785110',
+              projectId: 'shadow-chat-9edd9',
+              authDomain: 'shadow-chat-9edd9.firebaseapp.com',
+              storageBucket: 'shadow-chat-9edd9.firebasestorage.app',
             ),
           );
         } else {
