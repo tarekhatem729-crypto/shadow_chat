@@ -3556,16 +3556,35 @@ class _SecretRoomScreenState extends State<SecretRoomScreen>
                     final user = FirebaseAuth.instance.currentUser;
                     try {
                       if (firebaseReady && user != null) {
-                        await FirebaseFirestore.instance
+                          final membershipReference = FirebaseFirestore.instance
                             .collection('rooms')
                             .doc('secret_room')
                             .collection('members')
-                            .doc(user.uid)
-                            .set({
+                              .doc(user.uid);
+                          final membership = await membershipReference.get();
+                          final isOwner = (await FirebaseFirestore.instance
+                                  .collection('config')
+                                  .doc('app')
+                                  .get())
+                              .data()?['ownerUid'] == user.uid;
+                          if (!membership.exists && !isOwner) {
+                            if (mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('يجب أن يضيفك مالك الغرفة أولًا قبل الدخول'),
+                                  backgroundColor: Colors.redAccent,
+                                ),
+                              );
+                            }
+                            return;
+                          }
+                          if (isOwner && !membership.exists) {
+                            await membershipReference.set({
                               'displayName': 'مالك الغرفة',
                               'addedBy': user.uid,
                               'addedAt': FieldValue.serverTimestamp(),
-                            }, SetOptions(merge: true));
+                            });
+                          }
                       }
                     } catch (error) {
                       debugPrint('Secret room entry membership error: $error');
