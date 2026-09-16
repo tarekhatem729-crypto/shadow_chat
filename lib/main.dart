@@ -4405,12 +4405,7 @@ class _SecretChatScreenState extends State<SecretChatScreen>
           .collection('members')
           .doc(user.uid)
           .get();
-      final addedAt = membership.data()?['addedAt'];
-      final isFreshMember = membership.exists &&
-          (addedAt is! Timestamp ||
-              _accessStartedAt == null ||
-              addedAt.toDate().isAfter(_accessStartedAt!));
-      if (mounted) setState(() => _isSecretMember = isFreshMember);
+        if (mounted) setState(() => _isSecretMember = membership.exists);
     } catch (error) {
       debugPrint('Secret membership load error: $error');
       if (mounted) setState(() => _isSecretMember = false);
