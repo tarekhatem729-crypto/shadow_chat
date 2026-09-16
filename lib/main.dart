@@ -4364,7 +4364,7 @@ class _SecretChatScreenState extends State<SecretChatScreen>
       }
       if (autoDeleteMessagesNotifier.value) {
         Future.delayed(const Duration(seconds: 8), () {
-          if (mounted && autoDeleteMessagesNotifier.value) {
+          if (mounted) {
             setState(() {
               _secretMessages.removeWhere(
                 (message) => message['text'] == text && message['isMe'] == true,
@@ -4517,6 +4517,7 @@ class _SecretChatScreenState extends State<SecretChatScreen>
 
   void _listenToSecretMessages() {
     if (!firebaseReady) return;
+    unawaited(deleteExpiredOwnChatMessages(_secretChatId));
     _secretMessagesSubscription = FirebaseFirestore.instance
         .collection('chats')
         .doc(_secretChatId)
@@ -4532,9 +4533,14 @@ class _SecretChatScreenState extends State<SecretChatScreen>
             final messages = snapshot.docs.reversed.map((doc) {
               final data = doc.data();
               final deletedFor = data['deletedFor'];
+              final expiresAt = data['expiresAt'];
               if (currentUid != null &&
                   deletedFor is List &&
                   deletedFor.contains(currentUid)) {
+                return null;
+              }
+              if (expiresAt is Timestamp &&
+                  expiresAt.compareTo(Timestamp.now()) <= 0) {
                 return null;
               }
               final timestamp = data['createdAt'];
@@ -7322,9 +7328,15 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
   }
 
   Future<void> _loadChatPassword() async {
-    if (!firebaseReady) return;
+    if (!firebaseReady) {
+      _playWhaleIfChatUnlocked();
+      return;
+    }
     final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
+    if (user == null) {
+      _playWhaleIfChatUnlocked();
+      return;
+    }
     try {
       final snapshot = await FirebaseFirestore.instance
           .collection('users')
@@ -7339,14 +7351,25 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
           _chatPassword = passwordHash;
           _chatLocked = true;
         });
+      } else {
+        _playWhaleIfChatUnlocked();
       }
     } catch (error) {
       debugPrint('Chat password load error: $error');
+      _playWhaleIfChatUnlocked();
     }
+  }
+
+  void _playWhaleIfChatUnlocked() {
+    if (_chatLocked || !whaleSoundNotifier.value) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && !_chatLocked) unawaited(_playWhaleSound());
+    });
   }
 
   void _listenToChatMessages() {
     if (!firebaseReady) return;
+    unawaited(deleteExpiredOwnChatMessages(_chatId));
     _messagesSubscription = FirebaseFirestore.instance
         .collection('chats')
         .doc(_chatId)
@@ -7374,9 +7397,14 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
             final messages = snapshot.docs.reversed.map((doc) {
               final data = doc.data();
               final deletedFor = data['deletedFor'];
+              final expiresAt = data['expiresAt'];
               if (currentUid != null &&
                   deletedFor is List &&
                   deletedFor.contains(currentUid)) {
+                return null;
+              }
+              if (expiresAt is Timestamp &&
+                  expiresAt.compareTo(Timestamp.now()) <= 0) {
                 return null;
               }
               final mediaUrl = data['mediaUrl'] as String?;
@@ -8046,9 +8074,9 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
   }
 
   void _scheduleMessageDeletion(Message message) {
-    if (!autoDeleteMessagesNotifier.value || !message.isMe) return;
+    if (!message.isMe) return;
     Future.delayed(const Duration(seconds: 8), () {
-      if (mounted && autoDeleteMessagesNotifier.value) {
+      if (mounted) {
         setState(() => _messages.remove(message));
       }
       unawaited(deleteExpiredOwnChatMessages(_chatId));
