@@ -643,11 +643,15 @@ Future<void> deleteExpiredOwnChatMessages(String chatId) async {
         .doc(chatId)
         .collection('messages')
         .where('uid', isEqualTo: user.uid)
-        .where('expiresAt', isLessThanOrEqualTo: Timestamp.now())
         .get();
+    final now = Timestamp.now();
     var batch = FirebaseFirestore.instance.batch();
     var operationCount = 0;
     for (final message in snapshot.docs) {
+      final expiresAt = message.data()['expiresAt'];
+      if (expiresAt is! Timestamp || expiresAt.compareTo(now) > 0) {
+        continue;
+      }
       batch.delete(message.reference);
       operationCount++;
       if (operationCount == 450) {
@@ -7238,12 +7242,6 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
       _directAccessChecked = true;
       _listenToChatMessages();
     }
-    if (!_chatLocked && whaleSoundNotifier.value) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && !_chatLocked) unawaited(_playWhaleSound());
-      });
-    }
-
     _whaleController = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 8),
@@ -7336,6 +7334,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
           .get();
       final passwordHash = snapshot.data()?['passwordHash'];
       if (passwordHash is String && mounted) {
+        await _chatAudioPlayer.stop();
         setState(() {
           _chatPassword = passwordHash;
           _chatLocked = true;
