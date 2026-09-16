@@ -81,12 +81,13 @@ service cloud.firestore {
         && request.resource.data.uid == resource.data.uid
         && request.resource.data.diff(resource.data).affectedKeys()
             .hasOnly(['deletedFor'])
-        && request.resource.data.deletedFor is list
-        && resource.data.deletedFor is list
-        && request.resource.data.deletedFor.hasAll(resource.data.deletedFor)
-        && request.resource.data.deletedFor.hasAll([request.auth.uid])
-        && request.resource.data.deletedFor.size()
-            <= resource.data.deletedFor.size() + 1;
+        && request.resource.data.get('deletedFor', []) is list
+        && resource.data.get('deletedFor', []) is list
+        && request.resource.data.get('deletedFor', [])
+          .hasAll(resource.data.get('deletedFor', []))
+        && request.resource.data.get('deletedFor', []).hasAll([request.auth.uid])
+        && request.resource.data.get('deletedFor', []).size()
+          <= resource.data.get('deletedFor', []).size() + 1;
       allow delete: if canAccessChat(chatId)
         && resource.data.uid == request.auth.uid;
     }

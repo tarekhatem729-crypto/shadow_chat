@@ -2665,13 +2665,6 @@ class _ContactsScreenState extends State<ContactsScreen> {
       'createdAt': FieldValue.serverTimestamp(),
     };
 
-    await FirebaseFirestore.instance
-        .collection('users')
-        .doc(user.uid)
-        .collection(contactsCollectionName(widget.scope))
-        .doc(targetUid)
-        .set(contactData, SetOptions(merge: true));
-
     if (widget.scope != ContactScope.regular) {
       final roomId = widget.scope == ContactScope.group
           ? 'secret_group'
@@ -2704,6 +2697,13 @@ class _ContactsScreenState extends State<ContactsScreen> {
         await refreshSecretRoomMemberNotifier();
       }
     }
+
+    await FirebaseFirestore.instance
+        .collection('users')
+        .doc(user.uid)
+        .collection(contactsCollectionName(widget.scope))
+        .doc(targetUid)
+        .set(contactData, SetOptions(merge: true));
   }
 
   String _regularContactDecision({
@@ -2971,6 +2971,14 @@ class _ContactsScreenState extends State<ContactsScreen> {
       }
     } catch (error) {
       debugPrint('Contact save error: $error');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('تعذرت الإضافة في Firebase. تأكد من نشر قواعد Firebase.'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
     }
   }
 
@@ -3094,6 +3102,14 @@ class _ContactsScreenState extends State<ContactsScreen> {
       }
     } catch (error) {
       debugPrint('One-tap add request error: $error');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('تعذرت الإضافة في Firebase. تأكد من نشر قواعد Firebase.'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
     } finally {
       if (mounted) setState(() => _sendingRequestUids.remove(targetUid));
     }
@@ -3538,17 +3554,30 @@ class _SecretRoomScreenState extends State<SecretRoomScreen>
                         secretRoomCodeHashNotifier.value;
                     if (isValidCode) {
                     final user = FirebaseAuth.instance.currentUser;
-                    if (firebaseReady && user != null) {
-                      await FirebaseFirestore.instance
-                          .collection('rooms')
-                          .doc('secret_room')
-                          .collection('members')
-                          .doc(user.uid)
-                          .set({
-                            'displayName': 'مالك الغرفة',
-                            'addedBy': user.uid,
-                            'addedAt': FieldValue.serverTimestamp(),
-                          }, SetOptions(merge: true));
+                    try {
+                      if (firebaseReady && user != null) {
+                        await FirebaseFirestore.instance
+                            .collection('rooms')
+                            .doc('secret_room')
+                            .collection('members')
+                            .doc(user.uid)
+                            .set({
+                              'displayName': 'مالك الغرفة',
+                              'addedBy': user.uid,
+                              'addedAt': FieldValue.serverTimestamp(),
+                            }, SetOptions(merge: true));
+                      }
+                    } catch (error) {
+                      debugPrint('Secret room entry membership error: $error');
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('تعذر دخول الغرفة. تأكد من نشر قواعد Firebase وتحقق صلاحية المالك.'),
+                            backgroundColor: Colors.redAccent,
+                          ),
+                        );
+                      }
+                      return;
                     }
                     setState(() {
                       _isUnlocked = true;
