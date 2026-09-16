@@ -52,6 +52,51 @@ const int maxSecretRoomMembers = 100;
 final ValueNotifier<List<String>> secretRoomMembersNotifier =
     ValueNotifier<List<String>>([]);
 
+bool canRemoveSecretMember({
+  required bool isGroup,
+  required bool ownerVerified,
+  required bool isOwnerUser,
+}) {
+  if (isGroup) return true;
+  return ownerVerified && isOwnerUser;
+}
+
+bool isSecretRoomAtCapacity(int memberCount) {
+  return memberCount >= maxSecretRoomMembers;
+}
+
+Future<int> countRoomMembers(String roomId) async {
+  if (!firebaseReady) return 0;
+  try {
+    final snapshot = await FirebaseFirestore.instance
+        .collection('rooms')
+        .doc(roomId)
+        .collection('members')
+        .limit(maxSecretRoomMembers + 1)
+        .get();
+    return snapshot.docs.length;
+  } catch (error) {
+    debugPrint('Room member count failed for $roomId: $error');
+    return 0;
+  }
+}
+
+Future<void> refreshSecretRoomMemberNotifier() async {
+  final roomId = 'secret_room';
+  if (!firebaseReady) return;
+  try {
+    final snapshot = await FirebaseFirestore.instance
+        .collection('rooms')
+        .doc(roomId)
+        .collection('members')
+        .get();
+    secretRoomMembersNotifier.value =
+        snapshot.docs.map((doc) => doc.id).toList();
+  } catch (error) {
+    debugPrint('Secret room member refresh failed: $error');
+  }
+}
+
 final ValueNotifier<bool> englishLanguageNotifier = ValueNotifier<bool>(false);
 final ValueNotifier<bool> appLockEnabledNotifier = ValueNotifier<bool>(false);
 final ValueNotifier<String?> appLockPasswordNotifier = ValueNotifier<String?>(
@@ -1100,6 +1145,28 @@ String normalizePhoneNumber(String phone) =>
           return '٠١٢٣٤٥٦٧٨٩'.indexOf(match.group(0)!).toString();
         })
         .replaceAll(RegExp(r'[^0-9+]'), '');
+
+String determineRegularContactAction({
+  required String myStatus,
+  required String otherStatus,
+}) {
+  final normalizedMyStatus = myStatus.trim().toLowerCase();
+  final normalizedOtherStatus = otherStatus.trim().toLowerCase();
+
+  if (normalizedMyStatus == 'accepted' || normalizedOtherStatus == 'accepted') {
+    return 'accepted';
+  }
+  if (normalizedMyStatus == 'pending' || normalizedOtherStatus == 'pending') {
+    return 'pending';
+  }
+  if (normalizedMyStatus == 'incoming' || normalizedOtherStatus == 'incoming') {
+    return 'incoming';
+  }
+  if (normalizedMyStatus == 'rejected' || normalizedOtherStatus == 'rejected') {
+    return 'rejected';
+  }
+  return 'none';
+}
 
 String _phoneSearchKey(String phone) {
   final normalizedPhone = normalizePhoneNumber(phone);
@@ -2521,6 +2588,14 @@ class _ContactsScreenState extends State<ContactsScreen> {
   final Set<String> _sendingRequestUids = <String>{};
 
   @override
+  void initState() {
+    super.initState();
+    if (widget.scope == ContactScope.room) {
+      unawaited(refreshSecretRoomMemberNotifier());
+    }
+  }
+
+  @override
   void dispose() {
     _contactIdController.dispose();
     _nameController.dispose();
@@ -2601,6 +2676,20 @@ class _ContactsScreenState extends State<ContactsScreen> {
       final roomId = widget.scope == ContactScope.group
           ? 'secret_group'
           : 'secret_room';
+      if (widget.scope == ContactScope.room) {
+        final memberCount = await countRoomMembers(roomId);
+        if (isSecretRoomAtCapacity(memberCount)) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('تم الوصول إلى الحد الأقصى 100 عضو في الغرفة السرية'),
+                backgroundColor: Colors.redAccent,
+              ),
+            );
+          }
+          return;
+        }
+      }
       await FirebaseFirestore.instance
           .collection('rooms')
           .doc(roomId)
@@ -2611,7 +2700,20 @@ class _ContactsScreenState extends State<ContactsScreen> {
             'addedBy': user.uid,
             'addedAt': FieldValue.serverTimestamp(),
           }, SetOptions(merge: true));
+      if (widget.scope == ContactScope.room) {
+        await refreshSecretRoomMemberNotifier();
+      }
     }
+  }
+
+  String _regularContactDecision({
+    required String myStatus,
+    required String otherStatus,
+  }) {
+    return determineRegularContactAction(
+      myStatus: myStatus,
+      otherStatus: otherStatus,
+    );
   }
 
   Future<bool> _hasApprovedDirectContact(String targetUid) async {
@@ -2634,7 +2736,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
 
       final myStatus = (myDoc.data()?['status'] as String?) ?? 'none';
       final otherStatus = (otherDoc.data()?['status'] as String?) ?? 'none';
-      return myStatus == 'accepted' && otherStatus == 'accepted';
+      return _regularContactDecision(myStatus: myStatus, otherStatus: otherStatus) == 'accepted';
     } catch (error) {
       debugPrint('Approved contact check error: $error');
       return false;
@@ -2771,6 +2873,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
       if (targetUid == user.uid) {
         return;
       }
+
       final resolvedDisplayName = name.isEmpty
           ? (matchingUsers.docs.first.data()['displayName'] as String? ??
               'جهة اتصال')
@@ -2793,6 +2896,49 @@ class _ContactsScreenState extends State<ContactsScreen> {
         }
         return;
       }
+
+      final myDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .collection(contactsCollectionName(ContactScope.regular))
+          .doc(targetUid)
+          .get();
+      final otherDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(targetUid)
+          .collection(contactsCollectionName(ContactScope.regular))
+          .doc(user.uid)
+          .get();
+      final action = _regularContactDecision(
+        myStatus: (myDoc.data()?['status'] as String?) ?? 'none',
+        otherStatus: (otherDoc.data()?['status'] as String?) ?? 'none',
+      );
+
+      if (action == 'accepted') {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('أنت بالفعل متصل بهذا المستخدم')),
+          );
+        }
+        return;
+      }
+      if (action == 'pending') {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('طلب الإضافة لهذا المستخدم قيد الانتظار بالفعل')),
+          );
+        }
+        return;
+      }
+      if (action == 'incoming') {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('هذا المستخدم أرسل لك طلب اتصال بالفعل')),
+          );
+        }
+        return;
+      }
+
       await _saveContactRelationship(
         targetUid: targetUid,
         displayName: resolvedDisplayName,
@@ -2882,8 +3028,18 @@ class _ContactsScreenState extends State<ContactsScreen> {
           .collection(contactsCollectionName(ContactScope.regular))
           .doc(targetUid)
           .get();
-      final myStatus = (myExisting.data()?['status'] as String?) ?? 'none';
-      if (myStatus == 'accepted') {
+      final otherExisting = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(targetUid)
+          .collection(contactsCollectionName(ContactScope.regular))
+          .doc(user.uid)
+          .get();
+      final action = _regularContactDecision(
+        myStatus: (myExisting.data()?['status'] as String?) ?? 'none',
+        otherStatus: (otherExisting.data()?['status'] as String?) ?? 'none',
+      );
+
+      if (action == 'accepted') {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text('أنت بالفعل لديك صلاحية الدردشة مع $displayName')),
@@ -2891,24 +3047,18 @@ class _ContactsScreenState extends State<ContactsScreen> {
         }
         return;
       }
-
-      final otherExisting = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(targetUid)
-          .collection(contactsCollectionName(ContactScope.regular))
-          .doc(user.uid)
-          .get();
-      final otherStatus = (otherExisting.data()?['status'] as String?) ?? 'none';
-      if (otherStatus == 'accepted') {
-        await _saveContactRelationship(
-          targetUid: targetUid,
-          displayName: displayName.isEmpty ? publicId : displayName,
-          publicId: publicId,
-          status: 'accepted',
-        );
+      if (action == 'pending') {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('تمت موافقة الطرف الآخر تلقائيًا مع $displayName')),
+            SnackBar(content: Text('طلب الإضافة إلى $displayName موجود بالفعل في الانتظار')),
+          );
+        }
+        return;
+      }
+      if (action == 'incoming') {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('هذا المستخدم أرسل لك طلب اتصال بالفعل')),
           );
         }
         return;
@@ -3486,7 +3636,9 @@ class _SecretRoomScreenState extends State<SecretRoomScreen>
                 style: TextStyle(color: Colors.white, fontSize: 14),
               ),
               subtitle: Text(
-                'الأعضاء: ${members.length} / $maxSecretRoomMembers',
+                members.length >= maxSecretRoomMembers
+                    ? 'تم الوصول إلى الحد الأقصى: ${members.length} / $maxSecretRoomMembers'
+                    : 'الأعضاء: ${members.length} / $maxSecretRoomMembers',
                 style: const TextStyle(color: Colors.white54, fontSize: 12),
               ),
               trailing: const Icon(
@@ -3568,6 +3720,7 @@ class _SecretRoomScreenState extends State<SecretRoomScreen>
                   valueListenable: secretRoomMembersNotifier,
                   builder: (context, members, child) {
                     final contacts = contactsSnapshot.data?.docs ?? [];
+                    final currentMemberCount = members.length;
                     final availableContacts = contacts
                         .where((contact) => !members.contains(contact.id))
                         .toList();
@@ -3579,9 +3732,9 @@ class _SecretRoomScreenState extends State<SecretRoomScreen>
                       ),
                       content: SizedBox(
                         width: double.maxFinite,
-                        child: members.length >= maxSecretRoomMembers
+                        child: isSecretRoomAtCapacity(currentMemberCount)
                             ? const Text(
-                                'تم الوصول إلى الحد الأقصى للأعضاء.',
+                                'تم الوصول إلى الحد الأقصى: تم توصيل 100 عضو في الغرفة السرية. لا يمكن إضافة أعضاء جدد فعليًا.',
                                 style: TextStyle(color: Colors.white70),
                               )
                             : availableContacts.isEmpty
@@ -3613,6 +3766,19 @@ class _SecretRoomScreenState extends State<SecretRoomScreen>
                                       ),
                                     ),
                                     onTap: () async {
+                                      final memberCount = await countRoomMembers('secret_room');
+                                      if (isSecretRoomAtCapacity(memberCount)) {
+                                        if (dialogContext.mounted) {
+                                          ScaffoldMessenger.of(dialogContext).showSnackBar(
+                                            const SnackBar(
+                                              content: Text('تم الوصول إلى الحد الأقصى 100 عضو في الغرفة السرية'),
+                                              backgroundColor: Colors.redAccent,
+                                            ),
+                                          );
+                                        }
+                                        return;
+                                      }
+
                                       await FirebaseFirestore.instance
                                           .collection('rooms')
                                           .doc('secret_room')
@@ -3626,10 +3792,7 @@ class _SecretRoomScreenState extends State<SecretRoomScreen>
                                             'addedAt':
                                                 FieldValue.serverTimestamp(),
                                           });
-                                      secretRoomMembersNotifier.value = [
-                                        ...members,
-                                        contact.id,
-                                      ];
+                                      await refreshSecretRoomMemberNotifier();
                                       if (dialogContext.mounted)
                                         Navigator.pop(dialogContext);
                                     },
@@ -3755,6 +3918,133 @@ class SecretMembersScreen extends StatefulWidget {
 
 class _SecretMembersScreenState extends State<SecretMembersScreen> {
   DateTime? _accessStartedAt;
+  bool _ownerVerifiedForRoom = false;
+
+  bool get _isSecretRoom => widget.roomId == 'secret_room';
+  bool get _isSecretGroup => widget.roomId == 'secret_group';
+
+  Future<void> _verifyRoomOwnerForRemoval() async {
+    if (!_isSecretRoom) return;
+
+    final TextEditingController ownerKeyController = TextEditingController();
+    final bool? verified = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: Colors.grey[900],
+        title: const Text(
+          'تحقق من مالك الغرفة',
+          style: TextStyle(color: Colors.amberAccent),
+        ),
+        content: TextField(
+          controller: ownerKeyController,
+          obscureText: true,
+          autofocus: true,
+          style: const TextStyle(color: Colors.white, letterSpacing: 2),
+          decoration: const InputDecoration(
+            hintText: 'مفتاح المالك',
+            hintStyle: TextStyle(color: Colors.white54),
+            prefixIcon: Icon(
+              Icons.admin_panel_settings,
+              color: Colors.amberAccent,
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('إلغاء', style: TextStyle(color: Colors.white54)),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              final user = FirebaseAuth.instance.currentUser;
+              final enteredKey = ownerKeyController.text.trim();
+              if (user == null) {
+                Navigator.pop(dialogContext, false);
+                return;
+              }
+              final isCurrentOwnerKey = enteredKey == initialRoomOwnerKey;
+              final matchesStoredOwnerKey = await hashPassword(enteredKey) ==
+                  roomOwnerKeyHashNotifier.value;
+              bool isConfiguredOwner = false;
+              try {
+                final ownerSnapshot = await FirebaseFirestore.instance
+                    .collection('config')
+                    .doc('app')
+                    .get();
+                isConfiguredOwner = ownerSnapshot.data()?['ownerUid'] == user.uid;
+              } catch (error) {
+                debugPrint('Room owner verification error: $error');
+              }
+              if (isConfiguredOwner && (isCurrentOwnerKey || matchesStoredOwnerKey)) {
+                if (mounted) {
+                  Navigator.pop(dialogContext, true);
+                }
+                return;
+              }
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('مفتاح المالك غير صحيح'),
+                    backgroundColor: Colors.redAccent,
+                  ),
+                );
+              }
+              Navigator.pop(dialogContext, false);
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.amberAccent,
+              foregroundColor: Colors.black,
+            ),
+            child: const Text('تحقق'),
+          ),
+        ],
+      ),
+    );
+
+    if (verified == true) {
+      setState(() => _ownerVerifiedForRoom = true);
+    }
+  }
+
+  Future<void> _removeMember(String memberId, String displayName) async {
+    final currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser == null || memberId.isEmpty) return;
+    if (memberId == currentUser.uid) {
+      return;
+    }
+
+    try {
+      await FirebaseFirestore.instance
+          .collection('rooms')
+          .doc(widget.roomId)
+          .collection('members')
+          .doc(memberId)
+          .delete();
+
+      if (_isSecretRoom) {
+        await refreshSecretRoomMemberNotifier();
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('تمت إزالة $displayName من ${widget.title}'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
+    } catch (error) {
+      debugPrint('Failed to remove secret member: $error');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('تعذرت إزالة العضو'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
+    }
+  }
 
   @override
   void initState() {
@@ -3780,6 +4070,25 @@ class _SecretMembersScreenState extends State<SecretMembersScreen> {
           backgroundColor: const Color(0xFF171D26),
           foregroundColor: Colors.white,
           centerTitle: true,
+          actions: [
+            if (_isSecretRoom)
+              IconButton(
+                onPressed: _ownerVerifiedForRoom
+                    ? null
+                    : _verifyRoomOwnerForRemoval,
+                icon: Icon(
+                  _ownerVerifiedForRoom
+                      ? Icons.verified_user
+                      : Icons.admin_panel_settings_outlined,
+                  color: _ownerVerifiedForRoom
+                      ? const Color(0xFF38E8A5)
+                      : Colors.amberAccent,
+                ),
+                tooltip: _ownerVerifiedForRoom
+                    ? 'تم التحقق من المالك'
+                    : 'إدخال مفتاح المالك للإزالة',
+              ),
+          ],
         ),
         body: !firebaseReady
             ? const Center(
@@ -3858,6 +4167,26 @@ class _SecretMembersScreenState extends State<SecretMembersScreen> {
                         'عضو في ${widget.title}',
                         style: const TextStyle(color: Colors.white54),
                       ),
+                      trailing: (() {
+                        final memberId = visibleMembers[index].id;
+                        final memberName =
+                            visibleMembers[index].data()['displayName'] ?? 'مجهول الهوية';
+                        final bool canRemoveMember = canRemoveSecretMember(
+                          isGroup: _isSecretGroup,
+                          ownerVerified: _ownerVerifiedForRoom,
+                          isOwnerUser: _ownerVerifiedForRoom,
+                        ) && memberId != currentUid;
+
+                        if (!canRemoveMember) {
+                          return null;
+                        }
+
+                        return IconButton(
+                          onPressed: () => _removeMember(memberId, memberName),
+                          icon: const Icon(Icons.delete_forever, color: Colors.redAccent),
+                          tooltip: 'إزالة العضو',
+                        );
+                      })(),
                     ),
                   );
                 },
@@ -4059,13 +4388,86 @@ class _SecretChatScreenState extends State<SecretChatScreen>
     }
   }
 
+  Future<void> _leaveSecretChat() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (!firebaseReady || user == null) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: const Color(0xFF171D26),
+        title: const Text(
+          'تأكيد الخروج',
+          style: TextStyle(color: Colors.amberAccent),
+        ),
+        content: const Text(
+          'هل تريد الخروج من هذه المجموعة؟ لن تتمكن من إرسال رسائل حتى تتم إضافتك مرة أخرى.',
+          style: TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('إلغاء', style: TextStyle(color: Colors.white54)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('خروج', style: TextStyle(color: Colors.redAccent)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    final roomId = widget.chatTitle.contains('الغرفة السوداء')
+        ? 'secret_room'
+        : 'secret_group';
+    try {
+      await FirebaseFirestore.instance
+          .collection('rooms')
+          .doc(roomId)
+          .collection('members')
+          .doc(user.uid)
+          .delete();
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .collection(
+            contactsCollectionName(
+              roomId == 'secret_group'
+                  ? ContactScope.group
+                  : ContactScope.room,
+            ),
+          )
+          .doc(user.uid)
+          .delete();
+
+      await _secretMessagesSubscription?.cancel();
+      _secretMessagesSubscription = null;
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('تم الخروج من المحادثة بنجاح')),
+      );
+      Navigator.of(context).pop();
+    } catch (error) {
+      debugPrint('Secret chat leave error: $error');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('تعذر الخروج الآن، حاول مرة أخرى'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
+    }
+  }
+
   void _listenToSecretMessages() {
     if (!firebaseReady) return;
     _secretMessagesSubscription = FirebaseFirestore.instance
         .collection('chats')
         .doc(_secretChatId)
         .collection('messages')
-        .orderBy('createdAt')
+      .orderBy('createdAt', descending: true)
         .limit(100)
         .snapshots()
         .listen(
@@ -4073,7 +4475,7 @@ class _SecretChatScreenState extends State<SecretChatScreen>
             if (!mounted) return;
             final currentUid = FirebaseAuth.instance.currentUser?.uid;
             final accessStartedAt = _accessStartedAt;
-            final messages = snapshot.docs.map((doc) {
+            final messages = snapshot.docs.reversed.map((doc) {
               final data = doc.data();
               final deletedFor = data['deletedFor'];
               if (currentUid != null &&
@@ -4864,6 +5266,11 @@ class _SecretChatScreenState extends State<SecretChatScreen>
                   );
                 },
               ),
+            IconButton(
+              icon: const Icon(Icons.logout, color: Colors.redAccent),
+              tooltip: 'الخروج من المحادثة',
+              onPressed: _leaveSecretChat,
+            ),
           ],
         ),
         body: Container(
@@ -6639,7 +7046,6 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
 
   String _presenceText(Map<String, dynamic>? data) {
     if (data?['ghostMode'] == true) return appText('الحالة مخفية', 'Status hidden');
-    if (data?['isOnline'] == true) return 'متصل الآن';
     final value = data?['lastSeen'] ?? data?['lastSeenAt'];
     DateTime? date;
     if (value is Timestamp) {
@@ -6648,6 +7054,11 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
       date = value.toLocal();
     } else if (value is String) {
       date = DateTime.tryParse(value)?.toLocal();
+    }
+    if (data?['isOnline'] == true &&
+        date != null &&
+        DateTime.now().difference(date).abs() <= const Duration(minutes: 2)) {
+      return 'متصل الآن';
     }
     if (date == null) return 'آخر ظهور غير متاح';
     final localizations = MaterialLocalizations.of(context);
@@ -6891,7 +7302,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
         .collection('chats')
         .doc(_chatId)
         .collection('messages')
-        .orderBy('createdAt')
+      .orderBy('createdAt', descending: true)
         .limit(100)
         .snapshots()
         .listen(
@@ -6911,7 +7322,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
               .where((msg) => msg.firestoreId == null)
               .toList();
             
-            final messages = snapshot.docs.map((doc) {
+            final messages = snapshot.docs.reversed.map((doc) {
               final data = doc.data();
               final deletedFor = data['deletedFor'];
               if (currentUid != null &&
@@ -7063,9 +7474,6 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
       }
     } catch (error) {
       debugPrint('Chat message save error: $error');
-      if (mounted) {
-        showGenericFailureSnackBar(context);
-      }
     }
   }
 
@@ -7445,9 +7853,6 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
       return downloadUrl;
     } catch (error) {
       debugPrint('Media upload error: $error');
-      if (mounted) {
-        showGenericFailureSnackBar(context);
-      }
       return saveLocally();
     }
   }

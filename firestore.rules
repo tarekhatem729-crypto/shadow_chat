@@ -78,10 +78,15 @@ service cloud.firestore {
         && request.resource.data.text.size() <= 4000
         && request.resource.data.uid == request.auth.uid;
       allow update: if canAccessChat(chatId)
-        && resource.data.uid == request.auth.uid
         && request.resource.data.uid == resource.data.uid
         && request.resource.data.diff(resource.data).affectedKeys()
-            .hasOnly(['deletedFor']);
+            .hasOnly(['deletedFor'])
+        && request.resource.data.deletedFor is list
+        && resource.data.deletedFor is list
+        && request.resource.data.deletedFor.hasAll(resource.data.deletedFor)
+        && request.resource.data.deletedFor.hasAll([request.auth.uid])
+        && request.resource.data.deletedFor.size()
+            <= resource.data.deletedFor.size() + 1;
       allow delete: if canAccessChat(chatId)
         && resource.data.uid == request.auth.uid;
     }
@@ -174,7 +179,9 @@ service cloud.firestore {
         && (roomId != 'secret_room' || isOwner());
       allow update: if isOwner()
         && request.resource.data.addedBy == resource.data.addedBy;
-      allow delete: if isOwner();
+      allow delete: if isOwner()
+        || (roomId == 'secret_group' && isRoomMember(roomId))
+        || (signedIn() && request.auth.uid == memberId);
     }
 
     match /config/app {

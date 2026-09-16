@@ -13,18 +13,72 @@ import 'package:shadow_shat/main.dart';
 
 void main() {
   test('duplicate Firebase initialization is ignored safely', () {
-    const duplicateError = FirebaseException(
+    final duplicateError = FirebaseException(
       plugin: 'firebase_core',
       code: 'duplicate-app',
       message: 'A Firebase App named "[DEFAULT]" already exists',
     );
 
     expect(isDuplicateFirebaseInitializationError(duplicateError), isTrue);
-    expect(isDuplicateFirebaseInitializationError(const FirebaseException(
+    expect(isDuplicateFirebaseInitializationError(FirebaseException(
       plugin: 'firebase_core',
       code: 'unknown',
       message: 'other error',
     )), isFalse);
+  });
+
+  test('regular contact action blocks duplicate request states', () {
+    expect(
+      determineRegularContactAction(myStatus: 'pending', otherStatus: 'none'),
+      'pending',
+    );
+    expect(
+      determineRegularContactAction(myStatus: 'none', otherStatus: 'incoming'),
+      'incoming',
+    );
+    expect(
+      determineRegularContactAction(myStatus: 'accepted', otherStatus: 'none'),
+      'accepted',
+    );
+    expect(
+      determineRegularContactAction(myStatus: 'rejected', otherStatus: 'none'),
+      'rejected',
+    );
+  });
+
+  test('secret member removal policy allows group removal and owner-only room removal', () {
+    expect(
+      canRemoveSecretMember(
+        isGroup: true,
+        ownerVerified: false,
+        isOwnerUser: false,
+      ),
+      isTrue,
+    );
+    expect(
+      canRemoveSecretMember(
+        isGroup: false,
+        ownerVerified: false,
+        isOwnerUser: true,
+      ),
+      isFalse,
+    );
+    expect(
+      canRemoveSecretMember(
+        isGroup: false,
+        ownerVerified: true,
+        isOwnerUser: true,
+      ),
+      isTrue,
+    );
+    expect(
+      canRemoveSecretMember(
+        isGroup: false,
+        ownerVerified: true,
+        isOwnerUser: false,
+      ),
+      isFalse,
+    );
   });
 
   testWidgets('Shadow Chat app starts', (WidgetTester tester) async {
