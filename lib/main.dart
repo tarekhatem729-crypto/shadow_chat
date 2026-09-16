@@ -1178,6 +1178,13 @@ String _phoneSearchKey(String phone) {
       : normalized;
 }
 
+String firebaseWriteFailureMessage(Object error) {
+  if (error is FirebaseException) {
+    return 'تعذرت الإضافة في Firebase (${error.code}). تحقق من تسجيل الدخول والاتصال وقواعد المشروع.';
+  }
+  return 'تعذرت الإضافة في Firebase. تحقق من الاتصال وإعدادات المشروع.';
+}
+
 Future<void> updatePresence(bool isOnline) async {
   if (!firebaseReady) return;
   final user = FirebaseAuth.instance.currentUser;
@@ -2973,8 +2980,8 @@ class _ContactsScreenState extends State<ContactsScreen> {
       debugPrint('Contact save error: $error');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('تعذرت الإضافة في Firebase. تأكد من نشر قواعد Firebase.'),
+          SnackBar(
+            content: Text(firebaseWriteFailureMessage(error)),
             backgroundColor: Colors.redAccent,
           ),
         );
@@ -3104,8 +3111,8 @@ class _ContactsScreenState extends State<ContactsScreen> {
       debugPrint('One-tap add request error: $error');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('تعذرت الإضافة في Firebase. تأكد من نشر قواعد Firebase.'),
+          SnackBar(
+            content: Text(firebaseWriteFailureMessage(error)),
             backgroundColor: Colors.redAccent,
           ),
         );

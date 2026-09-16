@@ -27,6 +27,15 @@ void main() {
     )), isFalse);
   });
 
+  test('Firebase add failures expose the real error code', () {
+    expect(
+      firebaseWriteFailureMessage(
+        FirebaseException(plugin: 'cloud_firestore', code: 'permission-denied'),
+      ),
+      contains('permission-denied'),
+    );
+  });
+
   test('regular contact action blocks duplicate request states', () {
     expect(
       determineRegularContactAction(myStatus: 'pending', otherStatus: 'none'),
