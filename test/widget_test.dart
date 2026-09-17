@@ -92,7 +92,7 @@ void main() {
 
   testWidgets('Shadow Chat app starts', (WidgetTester tester) async {
     appLockEnabledNotifier.value = true;
-    appLockPasswordNotifier.value = await hashPassword(defaultAppLockPassword);
+    appLockPasswordNotifier.value = await hashPassword('test-app-lock-password');
     await tester.pumpWidget(const MaterialApp(home: AppLockGate()));
 
     expect(find.byType(AppLockGate), findsOneWidget);

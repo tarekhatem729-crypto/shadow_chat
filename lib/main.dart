@@ -33,18 +33,13 @@ final ValueNotifier<bool> messageSoundNotifier = ValueNotifier<bool>(true);
 // متغير عام يتحكم في التشفير التلقائي للرسائل
 final ValueNotifier<bool> autoEncryptNotifier = ValueNotifier<bool>(false);
 
-// كود ثابت خاص بالغرفة السرية ولا يوجد خيار لتغييره من داخل التطبيق.
-const String secretRoomCode = '174285396';
 final ValueNotifier<String?> secretRoomCodeHashNotifier =
     ValueNotifier<String?>(null);
 
-// مفتاح إدارة الأعضاء للمالك فقط، ولا يظهر في أي واجهة للمستخدم.
-const String initialRoomOwnerKey = 'DARK132465798';
 final ValueNotifier<String?> roomOwnerKeyHashNotifier = ValueNotifier<String?>(
   null,
 );
 
-const String defaultAppLockPassword = '174285396';
 const bool secureLocalDemoMode = false;
 final ValueNotifier<Map<String, String>> chatPasswordsNotifier =
     ValueNotifier<Map<String, String>>({});
@@ -391,8 +386,7 @@ Future<String> hashPassword(String password) async {
 }
 
 Future<void> loadRoomOwnerKey() async {
-  final fallbackHash = await hashPassword(initialRoomOwnerKey);
-  roomOwnerKeyHashNotifier.value = fallbackHash;
+  roomOwnerKeyHashNotifier.value = null;
   if (!firebaseReady) return;
   try {
     final snapshot = await FirebaseFirestore.instance
@@ -409,8 +403,7 @@ Future<void> loadRoomOwnerKey() async {
 }
 
 Future<void> loadSecretRoomCode() async {
-  final fallbackHash = await hashPassword(secretRoomCode);
-  secretRoomCodeHashNotifier.value = fallbackHash;
+  secretRoomCodeHashNotifier.value = null;
   if (!firebaseReady) return;
   try {
     final snapshot = await FirebaseFirestore.instance
@@ -798,7 +791,9 @@ Future<void> disableChatPassword(String chatName) async {
 }
 
 Future<void> loadAppLockSettings() async {
-  var passwordHash = await hashPassword(defaultAppLockPassword);
+  var passwordHash = await hashPassword(
+    'shadow-lock-${DateTime.now().microsecondsSinceEpoch}',
+  );
   var enabled = false;
 
   // SharedPreferences is not supported on Linux
@@ -3560,9 +3555,10 @@ class _SecretRoomScreenState extends State<SecretRoomScreen>
                 ),
                 onPressed: () async {
                     final enteredCode = _codeController.text.trim();
-                    final isValidCode = enteredCode == secretRoomCode ||
-                      await hashPassword(enteredCode) ==
-                        secretRoomCodeHashNotifier.value;
+                    final isValidCode = enteredCode.isNotEmpty &&
+                        secretRoomCodeHashNotifier.value != null &&
+                        await hashPassword(enteredCode) ==
+                            secretRoomCodeHashNotifier.value;
                     if (isValidCode) {
                     final user = FirebaseAuth.instance.currentUser;
                     try {
@@ -3926,7 +3922,6 @@ class _SecretRoomScreenState extends State<SecretRoomScreen>
     final user = FirebaseAuth.instance.currentUser;
     if (user == null || !firebaseReady) return;
     final enteredKey = controller.text.trim();
-    final isCurrentOwnerKey = enteredKey == initialRoomOwnerKey;
     final matchesStoredOwnerKey = await hashPassword(enteredKey) ==
         roomOwnerKeyHashNotifier.value;
     var isConfiguredOwner = false;
@@ -3939,7 +3934,7 @@ class _SecretRoomScreenState extends State<SecretRoomScreen>
     } catch (error) {
       debugPrint('Room owner verification error: $error');
     }
-    if (isConfiguredOwner && (isCurrentOwnerKey || matchesStoredOwnerKey)) {
+    if (isConfiguredOwner && matchesStoredOwnerKey) {
       Navigator.pop(dialogContext);
       Navigator.push(
         context,
@@ -4021,7 +4016,6 @@ class _SecretMembersScreenState extends State<SecretMembersScreen> {
                 Navigator.pop(dialogContext, false);
                 return;
               }
-              final isCurrentOwnerKey = enteredKey == initialRoomOwnerKey;
               final matchesStoredOwnerKey = await hashPassword(enteredKey) ==
                   roomOwnerKeyHashNotifier.value;
               bool isConfiguredOwner = false;
@@ -4034,7 +4028,7 @@ class _SecretMembersScreenState extends State<SecretMembersScreen> {
               } catch (error) {
                 debugPrint('Room owner verification error: $error');
               }
-              if (isConfiguredOwner && (isCurrentOwnerKey || matchesStoredOwnerKey)) {
+              if (isConfiguredOwner && matchesStoredOwnerKey) {
                 if (mounted) {
                   Navigator.pop(dialogContext, true);
                 }

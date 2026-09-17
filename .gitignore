@@ -1,0 +1,18 @@
+# Flutter and Dart generated files
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+build/
+
+# Local secrets and signing material
+.env
+.env.*
+*.pem
+*.p12
+*.jks
+*.keystore
+service-account*.json
+
+# Local IDE files
+.idea/
+.vscode/
