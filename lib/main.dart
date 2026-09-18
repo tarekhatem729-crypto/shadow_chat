@@ -1173,13 +1173,18 @@ Future<void> ensureUserProfile() async {
         .collection('config')
         .doc('app');
     final configDoc = await configRef.get();
-        if (configDoc.data()?['ownerUid'] == null) {
-          await configRef.set({
-            'ownerUid': user.uid,
-            'createdAt': FieldValue.serverTimestamp(),
-          }, SetOptions(merge: true));
-        }
-        await ensureDefaultSecretCredentials();
+    if (configDoc.data()?['ownerUid'] == null) {
+      await configRef.set({
+        'ownerUid': user.uid,
+        'createdAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    }
+    await ensureDefaultSecretCredentials();
+  } catch (error) {
+    debugPrint('Owner assignment error: $error');
+  }
+}
+
 String normalizePhoneNumber(String phone) =>
     phone
         .replaceAllMapped(RegExp(r'[٠-٩]'), (match) {
