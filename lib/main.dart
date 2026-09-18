@@ -3003,11 +3003,53 @@ class _ContactsScreenState extends State<ContactsScreen> {
         return;
       }
 
+      final myDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .collection(contactsCollectionName(ContactScope.regular))
+          .doc(targetUid)
+          .get();
+      final otherDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(targetUid)
+          .collection(contactsCollectionName(ContactScope.regular))
+          .doc(user.uid)
+          .get();
+      final action = _regularContactDecision(
+        myStatus: (myDoc.data()?['status'] as String?) ?? 'none',
+        otherStatus: (otherDoc.data()?['status'] as String?) ?? 'none',
+      );
+
+      if (action == 'accepted') {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('أنت بالفعل متصل بهذا المستخدم')),
+          );
+        }
+        return;
+      }
+      if (action == 'pending') {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('طلب الإضافة لهذا المستخدم قيد الانتظار بالفعل')),
+          );
+        }
+        return;
+      }
+      if (action == 'incoming') {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('هذا المستخدم أرسل لك طلب اتصال بالفعل')),
+          );
+        }
+        return;
+      }
+
       await _saveContactRelationship(
         targetUid: targetUid,
         displayName: resolvedDisplayName,
         publicId: resolvedPublicId,
-        status: 'accepted',
+        status: 'pending',
       );
 
       await FirebaseFirestore.instance
@@ -3020,8 +3062,8 @@ class _ContactsScreenState extends State<ContactsScreen> {
             'uid': user.uid,
             'displayName': user.displayName ?? 'مستخدم',
             'name': user.displayName ?? 'مستخدم',
-            'lastMessage': 'تمت إضافة جهة الاتصال',
-            'status': 'accepted',
+            'lastMessage': 'طلب اتصال جديد',
+            'status': 'incoming',
             'updatedAt': FieldValue.serverTimestamp(),
             'createdAt': FieldValue.serverTimestamp(),
           }, SetOptions(merge: true));
@@ -3094,11 +3136,53 @@ class _ContactsScreenState extends State<ContactsScreen> {
         return;
       }
 
+      final myExisting = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .collection(contactsCollectionName(ContactScope.regular))
+          .doc(targetUid)
+          .get();
+      final otherExisting = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(targetUid)
+          .collection(contactsCollectionName(ContactScope.regular))
+          .doc(user.uid)
+          .get();
+      final action = _regularContactDecision(
+        myStatus: (myExisting.data()?['status'] as String?) ?? 'none',
+        otherStatus: (otherExisting.data()?['status'] as String?) ?? 'none',
+      );
+
+      if (action == 'accepted') {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('أنت بالفعل لديك صلاحية الدردشة مع $displayName')),
+          );
+        }
+        return;
+      }
+      if (action == 'pending') {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('طلب الإضافة إلى $displayName موجود بالفعل في الانتظار')),
+          );
+        }
+        return;
+      }
+      if (action == 'incoming') {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('هذا المستخدم أرسل لك طلب اتصال بالفعل')),
+          );
+        }
+        return;
+      }
+
       await _saveContactRelationship(
         targetUid: targetUid,
         displayName: displayName.isEmpty ? publicId : displayName,
         publicId: publicId,
-        status: 'accepted',
+        status: 'pending',
       );
 
       await FirebaseFirestore.instance
@@ -3111,15 +3195,15 @@ class _ContactsScreenState extends State<ContactsScreen> {
             'uid': user.uid,
             'displayName': user.displayName ?? 'مستخدم',
             'name': user.displayName ?? 'مستخدم',
-            'lastMessage': 'تمت إضافة جهة الاتصال',
-            'status': 'accepted',
+            'lastMessage': 'طلب اتصال جديد',
+            'status': 'incoming',
             'updatedAt': FieldValue.serverTimestamp(),
             'createdAt': FieldValue.serverTimestamp(),
           }, SetOptions(merge: true));
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('تمت إضافة $displayName بنجاح')),
+          SnackBar(content: Text('تم إرسال طلب الموافقة إلى $displayName')),
         );
       }
     } catch (error) {
