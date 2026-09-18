@@ -178,7 +178,8 @@ service cloud.firestore {
       allow read: if isRoomMember(roomId) || isOwner();
       allow create: if signedIn()
         && request.resource.data.addedBy == request.auth.uid
-        && (roomId != 'secret_room' || isOwner());
+        && isOwner()
+        && roomId in ['secret_room', 'secret_group'];
       allow update: if isOwner()
         && request.resource.data.addedBy == resource.data.addedBy;
       allow delete: if isOwner()

@@ -4487,30 +4487,6 @@ class _SecretChatScreenState extends State<SecretChatScreen>
       ? 'shadow_ops'
       : 'secret_group';
 
-  Future<void> _ensureSecretMembership() async {
-    if (!firebaseReady) return;
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
-    final roomId = widget.chatTitle.contains('الغرفة السوداء')
-        ? 'secret_room'
-        : 'secret_group';
-    try {
-      await FirebaseFirestore.instance
-          .collection('rooms')
-          .doc(roomId)
-          .collection('members')
-          .doc(user.uid)
-          .set({
-            'displayName': user.displayName ?? 'عضو المجموعة',
-            'addedBy': user.uid,
-            'addedAt': FieldValue.serverTimestamp(),
-          }, SetOptions(merge: true));
-      if (mounted) setState(() => _isSecretMember = true);
-    } catch (error) {
-      debugPrint('Secret membership save error: $error');
-    }
-  }
-
   Future<void> _loadSecretMembership() async {
     if (!firebaseReady) return;
     final user = FirebaseAuth.instance.currentUser;
@@ -4529,7 +4505,14 @@ class _SecretChatScreenState extends State<SecretChatScreen>
           .collection('members')
           .doc(user.uid)
           .get();
-        if (mounted) setState(() => _isSecretMember = membership.exists);
+      final ownerSnapshot = await FirebaseFirestore.instance
+          .collection('config')
+          .doc('app')
+          .get();
+      final isOwner = ownerSnapshot.data()?['ownerUid'] == user.uid;
+      if (mounted) {
+        setState(() => _isSecretMember = membership.exists || isOwner);
+      }
     } catch (error) {
       debugPrint('Secret membership load error: $error');
       if (mounted) setState(() => _isSecretMember = false);
@@ -5312,7 +5295,7 @@ class _SecretChatScreenState extends State<SecretChatScreen>
                       if (_groupPasswordHash != null &&
                           enteredHash == _groupPasswordHash) {
                         setState(() => _isUnlocked = true);
-                        await _ensureSecretMembership();
+                        await _loadSecretMembership();
                       } else {
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(
