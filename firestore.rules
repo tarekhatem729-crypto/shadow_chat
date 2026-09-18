@@ -127,17 +127,16 @@ service cloud.firestore {
       allow create: if (isSelf(userId)
           && contactId != request.auth.uid
           && request.resource.data.uid == contactId
-          && request.resource.data.status == 'pending')
+          && request.resource.data.status == 'accepted')
         || (signedIn()
           && contactId == request.auth.uid
           && request.resource.data.uid == request.auth.uid
-          && request.resource.data.status == 'incoming');
+          && request.resource.data.status == 'accepted');
       allow update: if (isSelf(userId)
           && ((resource.data.status == 'incoming'
                 && request.resource.data.status in ['accepted', 'rejected'])
               || (resource.data.status == 'pending'
-                && resource.data.uid == request.auth.uid
-                && request.resource.data.status == 'rejected')))
+                && request.resource.data.status in ['accepted', 'rejected'])))
         || (signedIn()
           && resource.data.uid == request.auth.uid
           && resource.data.status == 'pending'
