@@ -125,17 +125,18 @@ service cloud.firestore {
     match /users/{userId}/regularContacts/{contactId} {
       allow read: if isSelf(userId);
       allow create: if (isSelf(userId)
-          && request.resource.data.uid == request.auth.uid
+          && contactId != request.auth.uid
+          && request.resource.data.uid == contactId
           && request.resource.data.status == 'pending')
         || (signedIn()
           && contactId == request.auth.uid
           && request.resource.data.uid == request.auth.uid
           && request.resource.data.status == 'incoming');
       allow update: if (isSelf(userId)
-          && resource.data.uid == request.auth.uid
           && ((resource.data.status == 'incoming'
                 && request.resource.data.status in ['accepted', 'rejected'])
               || (resource.data.status == 'pending'
+                && resource.data.uid == request.auth.uid
                 && request.resource.data.status == 'rejected')))
         || (signedIn()
           && resource.data.uid == request.auth.uid
