@@ -393,35 +393,27 @@ Future<void> ensureDefaultSecretCredentials() async {
         .collection('config')
         .doc('app');
     final appSnapshot = await appConfigRef.get();
-    final existingOwnerKeyHash = appSnapshot.data()?['ownerKeyHash'] as String?;
-    final ownerKeyHash = existingOwnerKeyHash != null && existingOwnerKeyHash.isNotEmpty
-        ? existingOwnerKeyHash
-        : await hashPassword(defaultOwnerKey);
-
-    await appConfigRef.set({
-      'ownerKeyHash': ownerKeyHash,
-      if (appSnapshot.data()?['ownerUid'] != null)
-        'ownerUid': appSnapshot.data()!['ownerUid'],
-      'updatedAt': FieldValue.serverTimestamp(),
-    }, SetOptions(merge: true));
-
-    roomOwnerKeyHashNotifier.value = ownerKeyHash;
+    final configuredOwnerUid = appSnapshot.data()?['ownerUid'];
+    if (configuredOwnerUid == user.uid) {
+      final ownerKeyHash = await hashPassword(defaultOwnerKey);
+      await appConfigRef.set({
+        'ownerKeyHash': ownerKeyHash,
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+      roomOwnerKeyHashNotifier.value = ownerKeyHash;
+    }
 
     final secretConfigRef = FirebaseFirestore.instance
         .collection('config')
         .doc('secretRoom');
-    final secretSnapshot = await secretConfigRef.get();
-    final existingSecretCodeHash = secretSnapshot.data()?['codeHash'] as String?;
-    final secretCodeHash = existingSecretCodeHash != null && existingSecretCodeHash.isNotEmpty
-        ? existingSecretCodeHash
-        : await hashPassword(defaultSecretRoomCode);
-
-    await secretConfigRef.set({
-      'codeHash': secretCodeHash,
-      'updatedAt': FieldValue.serverTimestamp(),
-    }, SetOptions(merge: true));
-
-    secretRoomCodeHashNotifier.value = secretCodeHash;
+    if (configuredOwnerUid == user.uid) {
+      final secretCodeHash = await hashPassword(defaultSecretRoomCode);
+      await secretConfigRef.set({
+        'codeHash': secretCodeHash,
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+      secretRoomCodeHashNotifier.value = secretCodeHash;
+    }
   } catch (error) {
     debugPrint('Default secret config sync error: $error');
   }

@@ -188,7 +188,13 @@ service cloud.firestore {
 
     match /config/app {
       allow read: if signedIn();
-      allow write: if false;
+      allow create: if false;
+      allow update: if isOwner()
+        && request.resource.data.ownerUid == resource.data.ownerUid
+        && request.resource.data.ownerKeyHash is string
+        && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['ownerKeyHash', 'updatedAt']);
+      allow delete: if false;
     }
 
     match /config/secretRoom {
