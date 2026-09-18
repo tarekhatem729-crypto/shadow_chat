@@ -3654,6 +3654,7 @@ class _SecretRoomScreenState extends State<SecretRoomScreen>
                   style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                 ),
                 onPressed: () async {
+                  await loadSecretRoomCode();
                     final enteredCode = _codeController.text.trim();
                     final isValidCode = enteredCode.isNotEmpty &&
                         secretRoomCodeHashNotifier.value != null &&
@@ -4021,6 +4022,7 @@ class _SecretRoomScreenState extends State<SecretRoomScreen>
   ) async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null || !firebaseReady) return;
+    await loadRoomOwnerKey();
     final enteredKey = controller.text.trim();
     final matchesStoredOwnerKey = await hashPassword(enteredKey) ==
         roomOwnerKeyHashNotifier.value;
@@ -4116,6 +4118,7 @@ class _SecretMembersScreenState extends State<SecretMembersScreen> {
                 Navigator.pop(dialogContext, false);
                 return;
               }
+                await loadRoomOwnerKey();
               final matchesStoredOwnerKey = await hashPassword(enteredKey) ==
                   roomOwnerKeyHashNotifier.value;
               bool isConfiguredOwner = false;
