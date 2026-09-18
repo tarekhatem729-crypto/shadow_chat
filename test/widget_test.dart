@@ -55,6 +55,14 @@ void main() {
     );
   });
 
+  test('display names are sanitized consistently before saving', () {
+    expect(
+      sanitizeDisplayName('   علي   أحمد   '),
+      'علي أحمد',
+    );
+    expect(sanitizeDisplayName(''), isEmpty);
+  });
+
   test('secret member removal policy allows group removal and owner-only room removal', () {
     expect(
       canRemoveSecretMember(

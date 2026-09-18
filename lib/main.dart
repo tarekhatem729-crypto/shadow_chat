@@ -380,6 +380,53 @@ String appText(String arabic, String english) {
   return englishLanguageNotifier.value ? english : arabic;
 }
 
+const String defaultSecretRoomCode = '132465798';
+const String defaultOwnerKey = 'DARK132465798';
+
+Future<void> ensureDefaultSecretCredentials() async {
+  if (!firebaseReady) return;
+  final user = FirebaseAuth.instance.currentUser;
+  if (user == null) return;
+
+  try {
+    final appConfigRef = FirebaseFirestore.instance
+        .collection('config')
+        .doc('app');
+    final appSnapshot = await appConfigRef.get();
+    final existingOwnerKeyHash = appSnapshot.data()?['ownerKeyHash'] as String?;
+    final ownerKeyHash = existingOwnerKeyHash != null && existingOwnerKeyHash.isNotEmpty
+        ? existingOwnerKeyHash
+        : await hashPassword(defaultOwnerKey);
+
+    await appConfigRef.set({
+      'ownerKeyHash': ownerKeyHash,
+      if (appSnapshot.data()?['ownerUid'] != null)
+        'ownerUid': appSnapshot.data()!['ownerUid'],
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+
+    roomOwnerKeyHashNotifier.value = ownerKeyHash;
+
+    final secretConfigRef = FirebaseFirestore.instance
+        .collection('config')
+        .doc('secretRoom');
+    final secretSnapshot = await secretConfigRef.get();
+    final existingSecretCodeHash = secretSnapshot.data()?['codeHash'] as String?;
+    final secretCodeHash = existingSecretCodeHash != null && existingSecretCodeHash.isNotEmpty
+        ? existingSecretCodeHash
+        : await hashPassword(defaultSecretRoomCode);
+
+    await secretConfigRef.set({
+      'codeHash': secretCodeHash,
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+
+    secretRoomCodeHashNotifier.value = secretCodeHash;
+  } catch (error) {
+    debugPrint('Default secret config sync error: $error');
+  }
+}
+
 Future<String> hashPassword(String password) async {
   final bytes = await Sha256().hash(utf8.encode(password));
   return base64Encode(bytes.bytes);
@@ -1126,18 +1173,13 @@ Future<void> ensureUserProfile() async {
         .collection('config')
         .doc('app');
     final configDoc = await configRef.get();
-    // إذا لم يكن هناك owner بعد، عيّن المستخدم الحالي كـ owner
-    if (configDoc.data()?['ownerUid'] == null) {
-      await configRef.set({
-        'ownerUid': user.uid,
-        'createdAt': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
-    }
-  } catch (error) {
-    debugPrint('Owner assignment error: $error');
-  }
-}
-
+        if (configDoc.data()?['ownerUid'] == null) {
+          await configRef.set({
+            'ownerUid': user.uid,
+            'createdAt': FieldValue.serverTimestamp(),
+          }, SetOptions(merge: true));
+        }
+        await ensureDefaultSecretCredentials();
 String normalizePhoneNumber(String phone) =>
     phone
         .replaceAllMapped(RegExp(r'[٠-٩]'), (match) {
@@ -2995,6 +3037,67 @@ class _ContactsScreenState extends State<ContactsScreen> {
       normalized = normalized.replaceAll(arabicDigits[index], index.toString());
     }
     return normalized.replaceAll(RegExp(r'[^0-9+]'), '');
+  }
+
+  String sanitizeDisplayName(String value) {
+    final trimmed = value.trim();
+    if (trimmed.isEmpty) return '';
+    return trimmed.replaceAll(RegExp(r'\s+'), ' ');
+  }
+
+  Future<void> syncUserDisplayNameAcrossApp(String newName) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+    final cleanedName = sanitizeDisplayName(newName);
+    if (cleanedName.isEmpty) return;
+
+    try {
+      await user.updateDisplayName(cleanedName);
+    } catch (error) {
+      debugPrint('Update auth display name failed: $error');
+    }
+
+    final firestore = FirebaseFirestore.instance;
+    final profileData = {
+      'displayName': cleanedName,
+      'name': cleanedName,
+      'updatedAt': FieldValue.serverTimestamp(),
+    };
+
+    await firestore
+        .collection('users')
+        .doc(user.uid)
+        .set(profileData, SetOptions(merge: true));
+
+    final publicId = currentPublicUserId ??
+        publicUserIdNotifier.value ??
+        'SC-${user.uid.substring(0, 6).toUpperCase()}';
+    await firestore
+        .collection('publicProfiles')
+        .doc(user.uid)
+        .set({
+          'uid': user.uid,
+          'displayName': cleanedName,
+          'publicId': publicId,
+          'updatedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+
+    final contactsSnapshot = await firestore
+        .collection('users')
+        .doc(user.uid)
+        .collection(contactsCollectionName(ContactScope.regular))
+        .get();
+
+    for (final doc in contactsSnapshot.docs) {
+      await doc.reference.set(
+        {
+          'displayName': cleanedName,
+          'name': cleanedName,
+          'updatedAt': FieldValue.serverTimestamp(),
+        },
+        SetOptions(merge: true),
+      );
+    }
   }
 
   String _phoneMatchKey(String phone) {
@@ -7772,7 +7875,10 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
               mediaUrl: mediaUrl,
             );
             _messages.add(voiceMessage);
-            _scheduleMessageDeletion(voiceMessage);
+            _scheduleMessageDeletion(
+              voiceMessage,
+              enabledAtSend: autoDeleteMessagesNotifier.value,
+            );
           });
           if (uploadedMediaUrl != null &&
               !uploadedMediaUrl.startsWith('local://')) {
@@ -7838,7 +7944,10 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
           mediaUrl: null,
         ),
       );
-      _scheduleMessageDeletion(_messages.last);
+      _scheduleMessageDeletion(
+        _messages.last,
+        enabledAtSend: autoDeleteMessagesNotifier.value,
+      );
     });
 
     // رفع الملف في الخلفية
@@ -8067,12 +8176,41 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     ]);
   }
 
-  void _scheduleMessageDeletion(Message message) {
-    if (!message.isMe) return;
+  void _scheduleMessageDeletion(
+    Message message, {
+    required bool enabledAtSend,
+  }) {
+    if (!enabledAtSend || !message.isMe) return;
+
+    final String? firestoreId = message.firestoreId;
+    final String comparisonKey = [
+      message.originalText,
+      message.mediaUrl ?? '',
+      message.time ?? '',
+    ].join('|');
+
     Future.delayed(const Duration(seconds: 8), () {
-      if (mounted) {
-        setState(() => _messages.remove(message));
+      if (!mounted) {
+        unawaited(deleteExpiredOwnChatMessages(_chatId));
+        return;
       }
+
+      setState(() {
+        _messages.removeWhere((candidate) {
+          if (firestoreId != null && candidate.firestoreId != null) {
+            return candidate.firestoreId == firestoreId;
+          }
+
+          final candidateKey = [
+            candidate.originalText,
+            candidate.mediaUrl ?? '',
+            candidate.time ?? '',
+          ].join('|');
+
+          return candidate.isMe == message.isMe && candidateKey == comparisonKey;
+        });
+      });
+
       unawaited(deleteExpiredOwnChatMessages(_chatId));
     });
   }
@@ -8311,7 +8449,10 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
             );
             _messages.add(sentMessage);
             _saveChatMessage(userText, isEncrypted: isEncrypted);
-            _scheduleMessageDeletion(sentMessage);
+            _scheduleMessageDeletion(
+              sentMessage,
+              enabledAtSend: autoDeleteMessagesNotifier.value,
+            );
             _isOtherTyping = true;
           });
           Future.delayed(const Duration(seconds: 1), () {
@@ -9453,22 +9594,17 @@ class _AccountAndThemeScreenState extends State<AccountAndThemeScreen> {
                       borderRadius: BorderRadius.circular(8),
                     ),
                   ),
-                  onPressed: () {
-                    if (nameController.text.trim().isNotEmpty) {
+                  onPressed: () async {
+                    final nextName = sanitizeDisplayName(nameController.text);
+                    if (nextName.isNotEmpty) {
                       setState(() {
-                        userName = nameController.text.trim();
+                        userName = nextName;
                       });
-                      final user = FirebaseAuth.instance.currentUser;
-                      if (firebaseReady && user != null) {
-                        FirebaseFirestore.instance
-                            .collection('users')
-                            .doc(user.uid)
-                            .set({
-                              'displayName': userName,
-                            }, SetOptions(merge: true));
+                      if (firebaseReady) {
+                        await syncUserDisplayNameAcrossApp(nextName);
                       }
                     }
-                    Navigator.pop(context);
+                    if (context.mounted) Navigator.pop(context);
                   },
                   child: const Text(
                     "حفظ",
