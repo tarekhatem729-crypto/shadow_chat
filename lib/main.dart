@@ -432,6 +432,67 @@ Future<String> hashPassword(String password) async {
   return base64Encode(bytes.bytes);
 }
 
+String sanitizeDisplayName(String value) {
+  final trimmed = value.trim();
+  if (trimmed.isEmpty) return '';
+  return trimmed.replaceAll(RegExp(r'\s+'), ' ');
+}
+
+Future<void> syncUserDisplayNameAcrossApp(String newName) async {
+  final user = FirebaseAuth.instance.currentUser;
+  if (user == null) return;
+  final cleanedName = sanitizeDisplayName(newName);
+  if (cleanedName.isEmpty) return;
+
+  try {
+    await user.updateDisplayName(cleanedName);
+  } catch (error) {
+    debugPrint('Update auth display name failed: $error');
+  }
+
+  final firestore = FirebaseFirestore.instance;
+  final profileData = {
+    'displayName': cleanedName,
+    'name': cleanedName,
+    'updatedAt': FieldValue.serverTimestamp(),
+  };
+
+  await firestore
+      .collection('users')
+      .doc(user.uid)
+      .set(profileData, SetOptions(merge: true));
+
+  final publicId = currentPublicUserId ??
+      publicUserIdNotifier.value ??
+      'SC-${user.uid.substring(0, 6).toUpperCase()}';
+  await firestore
+      .collection('publicProfiles')
+      .doc(user.uid)
+      .set({
+        'uid': user.uid,
+        'displayName': cleanedName,
+        'publicId': publicId,
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+
+  final contactsSnapshot = await firestore
+      .collection('users')
+      .doc(user.uid)
+      .collection(contactsCollectionName(ContactScope.regular))
+      .get();
+
+  for (final doc in contactsSnapshot.docs) {
+    await doc.reference.set(
+      {
+        'displayName': cleanedName,
+        'name': cleanedName,
+        'updatedAt': FieldValue.serverTimestamp(),
+      },
+      SetOptions(merge: true),
+    );
+  }
+}
+
 Future<void> loadRoomOwnerKey() async {
   roomOwnerKeyHashNotifier.value = null;
   if (!firebaseReady) return;
@@ -3042,67 +3103,6 @@ class _ContactsScreenState extends State<ContactsScreen> {
       normalized = normalized.replaceAll(arabicDigits[index], index.toString());
     }
     return normalized.replaceAll(RegExp(r'[^0-9+]'), '');
-  }
-
-  String sanitizeDisplayName(String value) {
-    final trimmed = value.trim();
-    if (trimmed.isEmpty) return '';
-    return trimmed.replaceAll(RegExp(r'\s+'), ' ');
-  }
-
-  Future<void> syncUserDisplayNameAcrossApp(String newName) async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
-    final cleanedName = sanitizeDisplayName(newName);
-    if (cleanedName.isEmpty) return;
-
-    try {
-      await user.updateDisplayName(cleanedName);
-    } catch (error) {
-      debugPrint('Update auth display name failed: $error');
-    }
-
-    final firestore = FirebaseFirestore.instance;
-    final profileData = {
-      'displayName': cleanedName,
-      'name': cleanedName,
-      'updatedAt': FieldValue.serverTimestamp(),
-    };
-
-    await firestore
-        .collection('users')
-        .doc(user.uid)
-        .set(profileData, SetOptions(merge: true));
-
-    final publicId = currentPublicUserId ??
-        publicUserIdNotifier.value ??
-        'SC-${user.uid.substring(0, 6).toUpperCase()}';
-    await firestore
-        .collection('publicProfiles')
-        .doc(user.uid)
-        .set({
-          'uid': user.uid,
-          'displayName': cleanedName,
-          'publicId': publicId,
-          'updatedAt': FieldValue.serverTimestamp(),
-        }, SetOptions(merge: true));
-
-    final contactsSnapshot = await firestore
-        .collection('users')
-        .doc(user.uid)
-        .collection(contactsCollectionName(ContactScope.regular))
-        .get();
-
-    for (final doc in contactsSnapshot.docs) {
-      await doc.reference.set(
-        {
-          'displayName': cleanedName,
-          'name': cleanedName,
-          'updatedAt': FieldValue.serverTimestamp(),
-        },
-        SetOptions(merge: true),
-      );
-    }
   }
 
   String _phoneMatchKey(String phone) {
