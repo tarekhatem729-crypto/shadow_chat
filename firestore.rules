@@ -137,11 +137,16 @@ service cloud.firestore {
                 && request.resource.data.status in ['accepted', 'rejected'])
               || (resource.data.status == 'pending'
                 && resource.data.uid == request.auth.uid
-                && request.resource.data.status == 'rejected')))
+                && request.resource.data.status == 'rejected')
+              || (resource.data.status == 'rejected'
+                && resource.data.uid == contactId
+                && request.resource.data.status == 'pending')))
         || (signedIn()
           && resource.data.uid == request.auth.uid
-          && resource.data.status == 'pending'
-          && request.resource.data.status in ['accepted', 'rejected']);
+          && ((resource.data.status == 'pending'
+                && request.resource.data.status in ['accepted', 'rejected'])
+              || (resource.data.status == 'rejected'
+                && request.resource.data.status == 'incoming')));
       allow delete: if isSelf(userId)
         || (signedIn() && resource.data.uid == request.auth.uid);
     }
