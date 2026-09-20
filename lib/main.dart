@@ -1089,6 +1089,11 @@ Future<SharedPreferences?> getSafeSharedPreferences() async {
   return SharedPreferences.getInstance();
 }
 
+const String firebaseWebApiKey = String.fromEnvironment(
+  'FIREBASE_WEB_API_KEY',
+  defaultValue: 'REPLACE_WITH_WEB_API_KEY',
+);
+
 Future<void> initializeFirebase() async {
   // Firebase is not supported on Linux desktop
   if (!kIsWeb && defaultTargetPlatform == TargetPlatform.linux) {
@@ -1109,8 +1114,8 @@ Future<void> initializeFirebase() async {
       try {
         if (kIsWeb) {
           await Firebase.initializeApp(
-            options: const FirebaseOptions(
-              apiKey: 'AIzaSyAyg-kuQKgCnYleTzBJUTyFOJkKNsPSj_M',
+            options: FirebaseOptions(
+              apiKey: firebaseWebApiKey,
               appId: '1:525641785110:android:acb70e1294c17dec00fa37',
               messagingSenderId: '525641785110',
               projectId: 'shadow-chat-9edd9',

@@ -9,9 +9,15 @@ build/
 .env.*
 *.pem
 *.p12
+*.p8
 *.jks
 *.keystore
+*.mobileprovision
 service-account*.json
+android/key.properties
+android/app/google-services.json
+ios/Runner/GoogleService-Info.plist
+android/app/*.keystore
 
 # Local IDE files
 .idea/
