@@ -380,45 +380,6 @@ String appText(String arabic, String english) {
   return englishLanguageNotifier.value ? english : arabic;
 }
 
-const String defaultSecretRoomCode = '132465798';
-const String defaultOwnerKey = 'DARK132465798';
-
-Future<void> ensureDefaultSecretCredentials() async {
-  if (!firebaseReady) return;
-  final user = FirebaseAuth.instance.currentUser;
-  if (user == null) return;
-
-  try {
-    final appConfigRef = FirebaseFirestore.instance
-        .collection('config')
-        .doc('app');
-    final appSnapshot = await appConfigRef.get();
-    final configuredOwnerUid = appSnapshot.data()?['ownerUid'];
-    if (configuredOwnerUid == user.uid) {
-      final ownerKeyHash = await hashPassword(defaultOwnerKey);
-      await appConfigRef.set({
-        'ownerKeyHash': ownerKeyHash,
-        'updatedAt': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
-      roomOwnerKeyHashNotifier.value = ownerKeyHash;
-    }
-
-    final secretConfigRef = FirebaseFirestore.instance
-        .collection('config')
-        .doc('secretRoom');
-    if (configuredOwnerUid == user.uid) {
-      final secretCodeHash = await hashPassword(defaultSecretRoomCode);
-      await secretConfigRef.set({
-        'codeHash': secretCodeHash,
-        'updatedAt': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
-      secretRoomCodeHashNotifier.value = secretCodeHash;
-    }
-  } catch (error) {
-    debugPrint('Default secret config sync error: $error');
-  }
-}
-
 Future<String> hashPassword(String password) async {
   final bytes = await Sha256().hash(utf8.encode(password));
   return base64Encode(bytes.bytes);
