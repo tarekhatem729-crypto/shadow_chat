@@ -10,6 +10,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_contacts/flutter_contacts.dart';
 import 'package:path_provider/path_provider.dart';
@@ -4707,16 +4708,24 @@ class _SecretChatScreenState extends State<SecretChatScreen>
   }
 
   Future<String?> _uploadSecretMedia(XFile file, String mediaType) async {
+    if (!firebaseReady) return null;
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return null;
+
     try {
-      final directory = await getApplicationDocumentsDirectory();
-      final safeName = file.name.replaceAll(RegExp(r'[^a-zA-Z0-9._-]'), '_');
-      final localFile = File(
-        '${directory.path}/secret_${mediaType}_${DateTime.now().millisecondsSinceEpoch}_$safeName',
-      );
-      await File(file.path).copy(localFile.path);
-      return 'local://${localFile.path}';
+      final fileName = 'secret_${mediaType}_${DateTime.now().millisecondsSinceEpoch}_${file.name}';
+      final uploadTask = FirebaseStorage.instance
+          .ref()
+          .child('users')
+          .child(user.uid)
+          .child('secret_media')
+          .child(mediaType)
+          .child(fileName)
+          .putFile(File(file.path));
+      final snapshot = await uploadTask;
+      return await snapshot.ref.getDownloadURL();
     } catch (error) {
-      debugPrint('Secret media local save error: $error');
+      debugPrint('Secret media upload error: $error');
       return null;
     }
   }
@@ -4777,8 +4786,22 @@ class _SecretChatScreenState extends State<SecretChatScreen>
           setState(() => _secretMessages.add(secretMsg));
         }
 
-        if (localPath != null) {
+        String? remoteUrl;
+        if (firebaseReady) {
+          remoteUrl = await _uploadSecretMedia(voiceFile, 'audio');
+          if (remoteUrl != null && mounted) {
+            setState(() {
+              final last = _secretMessages.isNotEmpty ? _secretMessages.last : null;
+              if (last != null) last['mediaUrl'] = remoteUrl;
+            });
+          }
+        }
+
+        if (remoteUrl == null && localPath != null) {
           await _saveLocalSecretVoiceMessage(path, messageTime);
+        }
+        if (remoteUrl != null) {
+          await _saveSecretMediaMessage('رسالة صوتية 🎙️', 'audio', remoteUrl);
         }
       } catch (error) {
         debugPrint('Secret voice recording stop error: $error');
@@ -4920,6 +4943,13 @@ class _SecretChatScreenState extends State<SecretChatScreen>
       } catch (error) {
         debugPrint('Secret local media delete error: $error');
       }
+    }
+    final mediaUrl = message['mediaUrl'] as String?;
+    if (!remote || mediaUrl == null || mediaUrl.isEmpty) return;
+    try {
+      await FirebaseStorage.instance.refFromURL(mediaUrl).delete();
+    } catch (error) {
+      debugPrint('Secret Firebase media delete error: $error');
     }
   }
 
@@ -7915,17 +7945,40 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
   }
 
   Future<String?> _uploadMedia(XFile file, String mediaType) async {
+    Future<String?> saveLocally() async {
+      try {
+        final directory = await getApplicationDocumentsDirectory();
+        final safeName = file.name.replaceAll(RegExp(r'[^a-zA-Z0-9._-]'), '_');
+        final localFile = File(
+          '${directory.path}/shadow_media_${DateTime.now().millisecondsSinceEpoch}_$safeName',
+        );
+        await File(file.path).copy(localFile.path);
+        return 'local://${localFile.path}';
+      } catch (error) {
+        debugPrint('Local media save error: $error');
+        return null;
+      }
+    }
+
+    if (!firebaseReady) return saveLocally();
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return saveLocally();
+
     try {
-      final directory = await getApplicationDocumentsDirectory();
-      final safeName = file.name.replaceAll(RegExp(r'[^a-zA-Z0-9._-]'), '_');
-      final localFile = File(
-        '${directory.path}/shadow_media_${DateTime.now().millisecondsSinceEpoch}_$safeName',
-      );
-      await File(file.path).copy(localFile.path);
-      return 'local://${localFile.path}';
+      final fileName = '${mediaType}_${DateTime.now().millisecondsSinceEpoch}_${file.name}';
+      final uploadTask = FirebaseStorage.instance
+          .ref()
+          .child('users')
+          .child(user.uid)
+          .child('media')
+          .child(mediaType)
+          .child(fileName)
+          .putFile(File(file.path));
+      final snapshot = await uploadTask;
+      return await snapshot.ref.getDownloadURL();
     } catch (error) {
-      debugPrint('Local media save error: $error');
-      return null;
+      debugPrint('Media upload error: $error');
+      return saveLocally();
     }
   }
 
@@ -8115,6 +8168,14 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
       } catch (error) {
         debugPrint('Local media delete error: $error');
       }
+    }
+    if (!remote || message.mediaUrl == null || message.mediaUrl!.isEmpty) {
+      return;
+    }
+    try {
+      await FirebaseStorage.instance.refFromURL(message.mediaUrl!).delete();
+    } catch (error) {
+      debugPrint('Firebase media delete error: $error');
     }
   }
 
