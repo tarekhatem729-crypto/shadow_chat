@@ -4427,13 +4427,6 @@ class _SecretChatScreenState extends State<SecretChatScreen>
       }
       if (autoDeleteMessagesNotifier.value) {
         Future.delayed(const Duration(seconds: 8), () {
-          if (mounted) {
-            setState(() {
-              _secretMessages.removeWhere(
-                (message) => message['text'] == text && message['isMe'] == true,
-              );
-            });
-          }
           unawaited(deleteExpiredOwnChatMessages(_secretChatId));
         });
       }
@@ -8127,35 +8120,11 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
   }) {
     if (!enabledAtSend || !message.isMe) return;
 
-    final String? firestoreId = message.firestoreId;
-    final String comparisonKey = [
-      message.originalText,
-      message.mediaUrl ?? '',
-      message.time ?? '',
-    ].join('|');
-
     Future.delayed(const Duration(seconds: 8), () {
       if (!mounted) {
         unawaited(deleteExpiredOwnChatMessages(_chatId));
         return;
       }
-
-      setState(() {
-        _messages.removeWhere((candidate) {
-          if (firestoreId != null && candidate.firestoreId != null) {
-            return candidate.firestoreId == firestoreId;
-          }
-
-          final candidateKey = [
-            candidate.originalText,
-            candidate.mediaUrl ?? '',
-            candidate.time ?? '',
-          ].join('|');
-
-          return candidate.isMe == message.isMe && candidateKey == comparisonKey;
-        });
-      });
-
       unawaited(deleteExpiredOwnChatMessages(_chatId));
     });
   }
