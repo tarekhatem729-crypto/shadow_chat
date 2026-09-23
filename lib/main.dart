@@ -1276,7 +1276,6 @@ Future<void> ensureUserProfile() async {
         'createdAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
     }
-    await ensureDefaultSecretCredentials();
   } catch (error) {
     debugPrint('Owner assignment error: $error');
   }

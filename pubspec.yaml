@@ -2,7 +2,7 @@ name: shadow_shat
 description: "Shadow Chat - BETA experimental release."
 publish_to: 'none'
 
-version: 1.0.0-beta.1+1
+version: 1.0.0-beta.2+2
 
 environment:
   sdk: ^3.12.2
