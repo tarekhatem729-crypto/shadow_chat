@@ -4584,6 +4584,7 @@ class _SecretChatScreenState extends State<SecretChatScreen>
               }
               final timestamp = data['createdAt'];
               if (accessStartedAt != null &&
+                  data['uid'] != currentUid &&
                   timestamp is Timestamp &&
                   timestamp.toDate().isBefore(accessStartedAt)) {
                 return null;
