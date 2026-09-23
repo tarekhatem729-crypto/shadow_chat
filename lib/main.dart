@@ -15,6 +15,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_contacts/flutter_contacts.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:http/http.dart' as http;
+import 'package:open_filex/open_filex.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
@@ -353,17 +354,13 @@ void _showUpdateDialog(
             foregroundColor: Colors.black,
           ),
           onPressed: () async {
-            Navigator.pop(dialogContext);
             if (downloadUrl != null && downloadUrl.isNotEmpty) {
-              if (await canLaunchUrl(Uri.parse(downloadUrl))) {
-                await launchUrl(Uri.parse(downloadUrl), mode: LaunchMode.externalApplication);
-              } else {
-                if (dialogContext.mounted) {
-                  ScaffoldMessenger.of(dialogContext).showSnackBar(
-                    const SnackBar(content: Text('لم تتمكن من فتح رابط التحميل')),
-                  );
-                }
-              }
+                Navigator.pop(dialogContext);
+                await _downloadAndInstallUpdate(context, downloadUrl);
+              } else if (dialogContext.mounted) {
+                ScaffoldMessenger.of(dialogContext).showSnackBar(
+                  const SnackBar(content: Text('رابط التحديث غير متاح حاليًا')),
+                );
             }
           },
           child: const Text(
@@ -374,6 +371,87 @@ void _showUpdateDialog(
       ],
     ),
   );
+}
+
+Future<void> _downloadAndInstallUpdate(
+  BuildContext context,
+  String downloadUrl,
+) async {
+  if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) {
+    final uri = Uri.tryParse(downloadUrl);
+    if (uri != null && await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+      return;
+    }
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('تعذر فتح رابط التحديث')),
+      );
+    }
+    return;
+  }
+
+  final uri = Uri.tryParse(downloadUrl);
+  if (uri == null || uri.scheme != 'https') {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('رابط التحديث غير آمن')),
+      );
+    }
+    return;
+  }
+
+  BuildContext? progressContext;
+  if (context.mounted) {
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        progressContext = dialogContext;
+        return const AlertDialog(
+          content: Row(
+            children: [
+              CircularProgressIndicator(),
+              SizedBox(width: 16),
+              Expanded(child: Text('جاري تنزيل التحديث...')),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  try {
+    final response = await http.get(uri);
+    if (response.statusCode != 200 || response.bodyBytes.isEmpty) {
+      throw Exception('Update download failed: ${response.statusCode}');
+    }
+    final directory = await getTemporaryDirectory();
+    final apkFile = File('${directory.path}/shadow_chat_update.apk');
+    await apkFile.writeAsBytes(response.bodyBytes, flush: true);
+    if (progressContext != null && progressContext!.mounted) {
+      Navigator.of(progressContext!).pop();
+    }
+    final result = await OpenFilex.open(
+      apkFile.path,
+      type: 'application/vnd.android.package-archive',
+    );
+    if (result.type != ResultType.done && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('تعذر فتح مثبت التحديث: ${result.message}')),
+      );
+    }
+  } catch (error) {
+    if (progressContext != null && progressContext!.mounted) {
+      Navigator.of(progressContext!).pop();
+    }
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('فشل تنزيل التحديث، حاول مرة أخرى')),
+      );
+    }
+    debugPrint('In-app update error: $error');
+  }
 }
 
 String appText(String arabic, String english) {
